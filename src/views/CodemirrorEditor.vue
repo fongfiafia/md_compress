@@ -9,6 +9,7 @@ import {
 } from '@/utils'
 import fileApi from '@/utils/file'
 import CodeMirror from 'codemirror'
+import { compressImage } from '@/utils/compress'
 
 const store = useStore()
 const displayStore = useDisplayStore()
@@ -61,7 +62,7 @@ function leftAndRightScroll() {
     }
 
     const percentage
-          = source.scrollTop / (source.scrollHeight - source.offsetHeight)
+      = source.scrollTop / (source.scrollHeight - source.offsetHeight)
     const height = percentage * (target.scrollHeight - target.offsetHeight)
 
     target.scrollTo(0, height)
@@ -141,25 +142,44 @@ function uploaded(imageUrl: string) {
   toRaw(store.editor!).replaceSelection(`\n${markdownImage}\n`, cursor as any)
   toast.success(`图片上传成功`)
 }
-function uploadImage(file: File, cb?: { (url: any): void, (arg0: unknown): void } | undefined) {
+
+async function uploadImage(file: File, cb?: { (url: any): void, (arg0: unknown): void } | undefined) {
   isImgLoading.value = true
 
-  toBase64(file)
-    .then(base64Content => fileApi.fileUpload(base64Content, file))
-    .then((url) => {
-      if (cb) {
-        cb(url)
-      }
-      else {
-        uploaded(url)
-      }
+  try {
+    console.log('[开始上传]', {
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: `${(file.size / 1024).toFixed(2)}KB`
     })
-    .catch((err) => {
-      toast.error(err.message)
+
+    // 压缩图片
+    const compressedFile = await compressImage(file, {
+      maxWidth: 1920,
+      maxHeight: 1080,
+      quality: 0.8
     })
-    .finally(() => {
-      isImgLoading.value = false
+
+    // 转base64并上传
+    const base64Content = await toBase64(compressedFile)
+    const url = await fileApi.fileUpload(base64Content, compressedFile)
+
+    console.log('[上传成功]', {
+      url,
+      finalSize: `${(compressedFile.size / 1024).toFixed(2)}KB`
     })
+
+    if (cb) {
+      cb(url)
+    } else {
+      uploaded(url)
+    }
+  } catch (err) {
+    console.error('[上传失败]', err)
+    toast.error(err.message)
+  } finally {
+    isImgLoading.value = false
+  }
 }
 
 const changeTimer = ref<NodeJS.Timeout>()
@@ -274,7 +294,7 @@ function mdLocalToRemote() {
           let [, , matchStr] = item
           matchStr = matchStr.replace(/^.\//, ``) // 处理 ./img/ 为 img/ 统一相对路径风格
           const { file }
-                = list.find(f => f.path === `${root}${matchStr}`) || {}
+            = list.find(f => f.path === `${root}${matchStr}`) || {}
           uploadImage(file!, (url) => {
             resolve({ matchStr, url })
           })
@@ -363,29 +383,16 @@ onMounted(() => {
 
 <template>
   <div ref="container" class="container flex flex-col">
-    <EditorHeader
-      @add-format="addFormat"
-      @format-content="formatContent"
-      @start-copy="startCopy"
-      @end-copy="endCopy"
-    />
+    <EditorHeader @add-format="addFormat" @format-content="formatContent" @start-copy="startCopy" @end-copy="endCopy" />
     <main class="container-main flex-1">
       <div class="container-main-section h-full flex border-1">
         <PostSlider />
-        <div
-          ref="codeMirrorWrapper"
-          class="codeMirror-wrapper flex-1 border-r-1"
-          :class="{
-            'order-1': !store.isEditOnLeft,
-          }"
-        >
+        <div ref="codeMirrorWrapper" class="codeMirror-wrapper flex-1 border-r-1" :class="{
+          'order-1': !store.isEditOnLeft,
+        }">
           <ContextMenu>
             <ContextMenuTrigger>
-              <textarea
-                id="editor"
-                type="textarea"
-                placeholder="Your markdown text here."
-              />
+              <textarea id="editor" type="textarea" placeholder="Your markdown text here." />
             </ContextMenuTrigger>
             <ContextMenuContent class="w-64">
               <ContextMenuItem inset @click="toggleShowUploadImgDialog()">
@@ -414,12 +421,7 @@ onMounted(() => {
             </ContextMenuContent>
           </ContextMenu>
         </div>
-        <div
-          id="preview"
-          ref="preview"
-          :span="isShowCssEditor ? 8 : 12"
-          class="preview-wrapper flex-1 p-5"
-        >
+        <div id="preview" ref="preview" :span="isShowCssEditor ? 8 : 12" class="preview-wrapper flex-1 p-5">
           <div id="output-wrapper" :class="{ output_night: !backLight }">
             <div class="preview border shadow-xl">
               <section id="output" v-html="output" />
@@ -436,9 +438,7 @@ onMounted(() => {
       </div>
     </main>
 
-    <UploadImgDialog
-      @upload-image="uploadImage"
-    />
+    <UploadImgDialog @upload-image="uploadImage" />
 
     <InsertFormDialog />
 
